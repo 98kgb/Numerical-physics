@@ -164,14 +164,14 @@ else:
 """여기부터 고쳐야함!"""
 
 Width_Tol = 25                                                               # tolereance in nm
-figure()
-num_discretization = 2^15
-Lp = linspace(0,1,num_discretization)# propa. dis. discretization.
+plt.figure(0)
+num_discretization = 2**15
+Lp = np.linspace(0,1,num_discretization)# propa. dis. discretization.
 ws_discretization = ParaFun(Lp)
 
 ### For periodical structure ###
 num_period = 1
-Lp = linspace(0,1,num_discretization*num_period)
+Lp = np.linspace(0,1,num_discretization*num_period)
 ws_discretization = repmat(ws_discretization,1,num_period)
 ###
 
@@ -194,10 +194,13 @@ plt.ylabel('Width nm')
 ### calculate steps from u=0 ###
 
 # New version of discretization of WG geo
-d_Lp = Lp(2)-Lp(1)
+d_Lp = Lp[1]-Lp[0]
 j = 1
-d_us=[] d_us(1) = 0
-us = [] us(1) = 0
+d_us=[]
+d_us(1) = 0
+us = []
+us(1) = 0
+
 while us(j)<1.0
     D_Lp = d_Lp #initialize by basic step defined by d_Lp
     while abs(ParaFun(us(j))-ParaFun(us(j)+D_Lp))<=Width_Tol
