@@ -308,6 +308,44 @@ def gnlse_YY_ODE45_TaperAdapt(t, A_0, w0, w_interp, W_dat, d_us, us, L_tot, Beta
     return [Z_z, AT_z, AW_z, W]
 
 
+def Dummy_simu(Width_Dummy, W_dat,Lambda,Fs_Beta,Fs_Beta1,Fs_Beta2,Fs_n_eff,Fs_A_eff,Fs_n2_eff, isPlot):
+    simu_num = len(W_dat)
+    Beta_Dummy = np.zeros(simu_num)
+    Beta1_Dummy = np.zeros(simu_num)
+    Beta2_Dummy = np.zeros(simu_num)
+    n_eff_Dummy = np.zeros(simu_num)
+    A_eff_Dummy = np.zeros(simu_num)
+    n2_eff_Dummy =np. zeros(simu_num)
+
+    for i in range(len(Fs_Beta2)):
+        Beta2_Dummy[i] = Fs_Beta2[i](Width_Dummy)
+        Beta_Dummy[i] = Fs_Beta[i](Width_Dummy)
+        Beta1_Dummy[i] = Fs_Beta1[i](Width_Dummy)
+        n_eff_Dummy[i] = Fs_n_eff[i](Width_Dummy)
+        A_eff_Dummy[i] = Fs_A_eff[i](Width_Dummy)
+        n2_eff_Dummy[i] = Fs_n2_eff[i](Width_Dummy)
+
+    if isPlot == 1:
+        lgd = ('width {} nm'.format(Width_Dummy))
+        plt.plot(Lambda*1e9,Beta2_Dummy*1e24,'o', label = lgd);
+        plt.ylabel(['\beta_{2} ','ps^{2} m^{-1}'])
+        plt.xlabel('Wavelength (nm)')
+        plt.title('TE polarisation')
+        plt.legend()
+        plt.plot(Lambda*1e9, 0*Lambda*1e9,'--')
+    
+    return [Beta_Dummy,Beta1_Dummy,Beta2_Dummy,n_eff_Dummy,A_eff_Dummy,n2_eff_Dummy]
+
+
+def DispersionVariation(z):
+
+    # g = 46 # m-1
+    # g = 125
+    g=0
+    
+    D_z = 1/(1 + g*z)
+    
+    return D_z
     
 # def rhs(z, AW, L, dT, gamma, RW, shock_W, fr = 0, RT = 0):
    
