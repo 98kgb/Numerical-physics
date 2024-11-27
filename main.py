@@ -1,342 +1,147 @@
 # -*- coding: utf-8 -*-
 """
-Test for the conversion (Matlab to python)
-
-@author: Gibaek
+THz Pulse Propagation using UPPE
 """
-
-import os
+from tqdm import tqdm
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.fft import fft, ifft, fft2, ifft2, fftfreq
 
-from scipy.interpolate import make_interp_spline
-from functions import Dummy_simu, DispersionVariation
+class THzPulse:
+    def __init__(self, t, x, y, z_max, N_z, lambda_0=1.55e-6, n2=1e-20, alpha=0.5, omega_R=1e13, delta_R=1e12):
+        """
+        Initialize the THzPulse simulation parameters.
 
-dir_path = os.path.dirname(os.path.abspath(__file__)) # get file directory
-
-
-save_enable = 0 # Saving options, 1 stands for save, 0 doesn't save. 0 for now (developing period)
-isMat = 0
-
-plot_evo_enable = 1
-plot_spectrum_enable = 1
-plot_beta2_enable = 1
-
-##
-isTM = 0
-Nsim = 3  # set simulation iteration times
-lambda0 = 1300*1e-9   #m
-Ch = 0# Initial chirp
-betas = [-1.172554609910727e-25, -4.291112339397303e-39]
-betas = False
-
-
-isPlot = 1
-isPlotGVD = 1
-
-# alpha = math.log(10)/10*400
-alpha = 0
-C = 299792458    # Speed of light [m/s]
-
-isAND_DW = 0
-
-if isAND_DW == 1:
-    print('WARNING!! all GVD curve are modified for all normal dispersion DW generation!\n')
-
-#%% Load all data from simulations.
-
-isEff = False
-
-if isEff:
-    print('WARNING!! effective geo is on, width is not real value!\n')
-else:
-    FolderName = 'SCG simulation JH'
-    SampleName = np.array([600,1200,2000]) # Sample variable
-
-
-isTM = 0
-
-file_name_list = []
-
-for ii in range(len(SampleName)):
-    if isTM == 0:
-        file_name_list.append('SiN_Strip_{}nm_h_700nm_TE_240731.txt'.format(SampleName[ii]))
-      
-    else:
-        file_name_list.append('SiN_Strip_{}nm_h_700nm_TM_240731.txt'.format(SampleName[ii]))
+        Parameters:
+        t : array
+            Time array (1D).
+        x, y : array
+            Spatial arrays for x and y directions (1D).
+        z_max : float
+            Maximum propagation distance (m).
+        N_z : int
+            Number of propagation steps.
+        lambda_0 : float, optional
+            Central wavelength (m). Default is 1.55e-6.
+        n2 : float, optional
+            Nonlinear refractive index (m^2/W). Default is 1e-20.
+        alpha : float, optional
+            Fraction of Kerr effect. Default is 0.5.
+        omega_R : float, optional
+            Raman resonance angular frequency. Default is 1e13.
+        delta_R : float, optional
+            Raman linewidth. Default is 1e12.
+        """
+        self.lambda_0 = lambda_0
+        self.n2 = n2
+        self.alpha = alpha
+        self.omega_R = omega_R
+        self.delta_R = delta_R
+        self.z_max = z_max
+        self.N_z = N_z
+        self.dz = z_max / N_z
+        self.t = t
+        self.dt = self.t[1] - self.t[0]
+        self.x = x
+        self.y = y
+        self.dx = self.x[1] - self.x[0]
+        self.dy = self.y[1] - self.y[0]
+        self.c = 3e8
+        self.k_0 = 2 * np.pi / self.lambda_0
+        self.omega = 2 * np.pi * fftfreq(len(self.t), self.dt)
         
-        print('WARNING!! for TM mode!\n')
-    
-    if isEff ==1:
-        print(file_name_list[ii])
+        # Transverse spatial frequency arrays
+        self.k_x = 2 * np.pi * fftfreq(len(self.x), self.dx)
+        self.k_y = 2 * np.pi * fftfreq(len(self.y), self.dy)
+        self.k_x, self.k_y = np.meshgrid(self.k_x, self.k_y)
+        self.k_perp2 = self.k_x**2 + self.k_y**2
 
-Lambda_list = []
-W_dat_list = []
-Beta_list = []
-Beta1_list = []
-Beta2_list = []
-n_eff_list = []
-A_eff_list = []
-n2_eff_list = []
-
-for ii in range(len(file_name_list)):
-   
-    file_name = 'width 640nm D 3.xlsx'
-    print('loading.. ',file_name,'\n')
-    
-    Mb = pd.read_excel(dir_path + '\\' + file_name)
-    Mb = Mb.to_numpy()
-    
-    Lambda = Mb[:, 0] * 1e-9
-    W_dat = Mb[:, 1]
-    Beta = Mb[:, 2]
-    Beta1 = Mb[:, 3]
-    Beta2 = Mb[:, 4]
-    n_eff = Mb[:, 5]
-    A_eff = Mb[:, 6]
-    n2_eff = Mb[:, 7]
-    
-    Lambda_list.append(Mb[:,0] * 1e-9)    
-    W_dat_list.append(Mb[:, 1])
-    Beta_list.append(Mb[:, 2])
-    Beta1_list.append(Mb[:, 3])
-    Beta2_list.append(Mb[:, 4])
-    n_eff_list.append(Mb[:, 5])
-    A_eff_list.append(Mb[:, 6])
-    n2_eff_list.append(Mb[:, 7])
-
-# convert list to numpy array
-Lambda_list, W_dat_list = np.array(Lambda_list), np.array(W_dat_list)
-Beta_list, Beta1_list, Beta2_list = np.array(Beta_list), np.array(Beta1_list), np.array(Beta2_list)
-n_eff_list, A_eff_list, n2_eff_list  = np.array(n_eff_list), np.array(A_eff_list), np.array(n2_eff_list)
-
-print('All data from simulation has been loaded.\n')
-
-
-"""Creation all regression functions to generate dummy simulation."""
-
-Widths_simu = SampleName # numer of variation in width 
-
-Fs_Beta = []
-Fs_Beta2 = []
-Fs_Beta1 = []
-
-Fs_n_eff = []
-Fs_A_eff = []
-Fs_n2_eff = []
-
-for ii in range(len(Mb)):
-    # Ensure the number of sample data for interpolation
-    if len(Widths_simu) >= 2 and len(Beta2_list[:,0]) >= 2:
+        # Initial electric field (Gaussian pulse in time and space)
+        T, X, Y = np.meshgrid(self.t, self.x, self.y, indexing="ij")
+        self.E_0 = np.exp(-T**2 / (2 * (50e-15)**2)) * np.exp(-(X**2 + Y**2) / (2 * (100e-6)**2))
         
-        F = make_interp_spline(Widths_simu, Beta_list[:,ii], k = 2)
-        Fs_Beta.append(F)
+    def linear_operator(self):
+        """
+        Calculate the linear propagation operator in the frequency domain.
+        """
+        k2_omega = (self.omega / self.c)**2
+        k2_omega = k2_omega[:, None, None]  # Expand dimensions to (N_t, 1, 1)
+        k_perp2 = self.k_perp2[None, :, :]  # Expand dimensions to (1, N_x, N_y)
+
+        diff = k2_omega - k_perp2
+        diff[diff < 0] = 0  # Set negative values to zero
+    
+        return -1j * np.sqrt(diff)
         
-        F = make_interp_spline(Widths_simu, Beta2_list[:,ii], k = 2)
-        Fs_Beta2.append(F)
+
+    def kerr_polarization(self, E):
+        """
+        Calculate Kerr effect polarization in the time domain.
+        """
+        intensity = np.abs(E)**2
+        return self.alpha * intensity * E
+
+    def raman_polarization(self, E):
+        """
+        Calculate Raman effect polarization in the frequency domain and convert to time domain.
+        """
+        intensity = np.abs(E)**2
+        intensity_w = fft(intensity, axis=0)  # Fourier Transform along the time axis
         
-        F = make_interp_spline(Widths_simu, Beta1_list[:,ii], k = 2)
-        Fs_Beta1.append(F)
-        
-        F = make_interp_spline(Widths_simu, n_eff_list[:,ii], k = 2)
-        Fs_n_eff.append(F)
-        
-        F = make_interp_spline(Widths_simu, A_eff_list[:,ii], k = 2)
-        Fs_A_eff.append(F)
-        
-        F = make_interp_spline(Widths_simu, n2_eff_list[:,ii], k = 2)
-        Fs_n2_eff.append(F)
-        
-    else:
-        print('Not enough data points for interpolation.')
-    
-    
-    if isPlot == 1:
-        plt.plot(Widths_simu, Beta2_list[:,ii] * 1e24, 'o')
-        plt.ylabel(['\beta_{2} ', 'ps^{2} m^{-1}'])
-        plt.xlabel('Width (nm)')
-        plt.title('TE polarisation')
-        
-        Widths_interp = np.linspace(700, 1500, 81)
-        plt.plot(Widths_interp, Fs_Beta2[ii](Widths_interp) * 1e24, '-')
-        
-print('All regression functions to generate dummy simulation data created.\n')
+        # Raman response in frequency domain
+        g_R_w = self.omega_R**2 / (self.omega_R**2 + 2j * self.omega * self.delta_R - self.omega**2)
+        raman_polarization_w = g_R_w[:, None, None] * intensity_w
 
-"""Define waveguide geometry, Dispersion managed WG geo creation with unified parametry u from 0 to 1"""
+        # Convert back to time domain
+        return ifft(raman_polarization_w, axis=0) * (1 - self.alpha)
 
-L = 0.006 # m
+    def solve(self):
+        """
+        Solve the THz pulse propagation using the Split-Step Fourier Method.
+        """
+        E = self.E_0.copy()
+        lin_op = self.linear_operator()
 
-ParaFun = lambda u: 640 + u * 0
+        for _ in tqdm(range(self.N_z), desc = 'UPPE solving...'):
+            # Step 1: Linear propagation in the frequency domain
+            E_w = fft2(E, axes=(1, 2))  # Spatial Fourier Transform
+            E_w *= np.exp(lin_op * self.dz)
+            E = ifft2(E_w, axes=(1, 2))
 
-isTailor = 0
-isOHY8P13 = 0
-isDM_design = 0
-betas = -9.661465159831380e-25
-betas= False
+            # Step 2: Calculate nonlinear polarization
+            P_kerr = self.kerr_polarization(E)
+            P_raman = self.raman_polarization(E)
+            P_total = P_kerr + P_raman
 
-"""
-Define DV as a function handle.
-It should only work when betas has values which means we are in theoritical study mode.
-later it will be used as betas * DV as a function of propagation distance us*L
-"""
+            # Step 3: Apply nonlinear change in the time domain
+            E += 1j * P_total * self.dz
 
-if betas:
-    DV = DispersionVariation
-    
-else:
-    DV = lambda u: 1
+        return E
 
-Width_Tol = 25 # tolereance in nm
-num_discretization = 2**15
-Lp = np.linspace(0,1,num_discretization)# propa. dis. discretization.
-ws_discretization = ParaFun(Lp)
+# Define simulation parameters
+t = np.linspace(-5e-13, 5e-13, 256)  # Time array
+x = np.linspace(-1e-3, 1e-3, 128)  # x spatial array
+y = np.linspace(-1e-3, 1e-3, 128)  # y spatial array
+z_max = 0.01  # Propagation distance (m)
+N_z = 100  # Number of steps
 
-### For periodical structure ###
-num_period = 1
-Lp = np.linspace(0,1,num_discretization*num_period)
-ws_discretization = np.tile(ws_discretization,(1,num_period))
+# Create the THzPulse model and solve it
+model = THzPulse(t, x, y, z_max, N_z)
+E = model.solve()
+#%% plot
+x_pos = 64
+y_pos = 65
 
-# New version of discretization of WG geo
-d_Lp = Lp[1]-Lp[0]
+plt.plot(t*10e12, np.abs(E[:,x_pos,y_pos])**2)
 
-j = 0
-d_us = [0]
-us = [0]
+plt.xlabel('Time (ps)')
 
-while us[j] < 1.0:
-    D_Lp = d_Lp #initialize by basic step defined by d_Lp
-    while abs(ParaFun(us[j]) - ParaFun(us[j] + D_Lp)) <= Width_Tol:
-        if us[j] + D_Lp > 1:
-            break
-        
-        D_Lp = D_Lp+d_Lp    
-    D_Lp = D_Lp-d_Lp # go back to tolerance
-    print('Width difference right now is: {} nm.'.format(abs(ParaFun(us[j])-ParaFun(us[j]+D_Lp))))
-    if D_Lp <= 0:
-        print('Warning!! Cannot fulfill tolerance demand, please change to more indense Lp.\n')
-        print('Problem happens at us(j) = {}.\n'.format(us[j]))
-        break
-    else:
-        us.append(us[j]+D_Lp)
-        d_us.append(D_Lp)
-       
-    j = j+1
-    # make sure propagation distance do not exceed 1.
-    if us[j] >= 1:
-        us[j] = 1
-        d_us[j] = 1 - us[j-1]
-    
-    print('Propa Dis u: {}.\n'.format(us[j]))
-
-
-del us[0]# to remove the first element 0
-del d_us[0] # to remove the first element 0
-
-us = np.array(us).conj().T
-d_us = np.array(d_us).conj().T
-widths = ParaFun(us)
-
-### consider periodical stucture###
-d_us = np.tile(d_us,(num_period,1))
-d_us = d_us/num_period #renormalised to 1
-widths = np.tile(widths,(1,num_period))
-
-if num_period>1:
-    us_p = us
-    for k in range(1,num_period): # 1이 아니라 2일 수도
-        us = np.hstack(1,us,(us_p+k-1)) # vstack 일수도
-
-us = us/num_period # renormalised to 1
-
-plt.title('Waveguide length: {} cm'.format(L*100))#,', tolerance:',num2str(Width_Tol),'nm'))
-plt.plot(us*L,widths,'-o')
-plt.xlim([0, L*2])
-print('{} segements at tolerence of {} nm.\n'.format(len(d_us),Width_Tol))
-print('Dispersion managed WG geo created.\n')
-
-
-# find dummy simulation data at different given width.
-Widths_Dummy = widths
-Width_num = len(Widths_Dummy)
-W_num = len(Mb)
-Betas_Dummy = np.zeros([W_num,Width_num])
-Beta1s_Dummy = np.zeros([W_num,Width_num])
-Beta2s_Dummy = np.zeros([W_num,Width_num])
-n_effs_Dummy = np.zeros([W_num,Width_num])
-A_effs_Dummy = np.zeros([W_num,Width_num])
-n2_effs_Dummy = np.zeros([W_num,Width_num])
-
-for ii in range(len(Widths_Dummy)):
-    Width_Dummy = Widths_Dummy[ii]
-    [Beta_Dummy,Beta1_Dummy,Beta2_Dummy,n_eff_Dummy,A_eff_Dummy,n2_eff_Dummy] = Dummy_simu(Width_Dummy, W_dat,Lambda
-                                                                                           ,Fs_Beta, Fs_Beta1,Fs_Beta2,
-                                                                                           Fs_n_eff,Fs_A_eff,Fs_n2_eff, isPlot)
-    Betas_Dummy[:,ii] = Beta_Dummy
-    Beta1s_Dummy[:,ii] = Beta1_Dummy
-    Beta2s_Dummy[:,ii] = Beta2_Dummy
-    n_effs_Dummy[:,ii] = n_eff_Dummy
-    A_effs_Dummy[:,ii] = A_eff_Dummy
-    n2_effs_Dummy[:,ii] = n2_eff_Dummy
-
-print('All dummy simu data created.\n')
-
-
-
-#%% Calculation starts
-
-P0_list=[600]
-
-for jj in range(len(P0_list)):
-    P0 = P0_list[jj]
-    FolderName = 'SCG_simu_results\SiN_240801'
-
-    isPulseCompression = 0
-    isHyperbolic = 1
-    isFilter = 0
-    isGaussian = 0
-
-    if isTM == 1:
-        FolderName = FolderName + '\\'+'TM'
-    else :
-        FolderName = FolderName + '\\' +'TE'
-    
-    DeviceName = '190fs_SiN_W640_Degree 3 L ' + str(L)
-    
-    if isMat == 1:
-        SaveName = FolderName + '//' + DeviceName + '_AVE' + str(Nsim) + '_lbd0nm_' + str(lambda0*1e9) + '_P0W_' + str(P0) + '.mat'
-    else:
-        SaveName = FolderName + '//' + DeviceName + '_AVE' + str(Nsim) + '_lbd0nm_' + str(lambda0*1e9) + '_P0W_' + str(P0)
-    
-    
-    Spectra = FolderName+'/' + DeviceName + '_AVE' + str(Nsim) + '_lbd0nm_' + str(lambda0*1e9) + '_P0W_' + str(P0)+'.png'
-    SpectraEvo = FolderName+'/' + DeviceName + '_AVE' + str(Nsim) + '_lbd0nm_' + str(lambda0*1e9) + '_P0W_' + str(P0)+'_Evo.png'
-    
-    try:
-        os.makedirs(SaveName, exist_ok=True)  # Create the folder (exist_ok=True prevents error if it already exists)
-        print(f"Folder '{SaveName}' created successfully or already exists.")
-    
-    except Exception as e:
-        print(f"Warning!!! Simulation results are not able to be saved! Reason: {e}")
-    
-    # the effective parameter of a str WG equivlent to real geo
-    Omega_eff = 2*np.pi*C/Lambda
-    Beta_eff = Betas_Dummy*d_us
-    Beta1_eff = Beta1s_Dummy*d_us
-    Beta2_eff=Beta2s_Dummy*d_us#effective beta2, the average GVD of all waveguide
-    n_eff_eff = n_effs_Dummy*d_us
-    A_eff_eff = A_effs_Dummy*d_us
-    ng_eff = Beta_eff*0
-    n2_eff_eff = Beta_eff*0
-    D_eff = Beta_eff*0
-    #%%
-    SCG_average # 여기부터 develop. w0를 SCG_average에서 받아와야함.
-
-n2 = 2.4e-19
-Tfwhm = 190e-15
-Dlength = Tfwhm**2/abs(Beta2)
-gamma = w0*n2/(C*A_eff_eff) 
-NLlength = 1/(P0_list*gamma)
-NofSoliton = (Dlength/NLlength)**(1/2)
-Ratiooflengths = Dlength/NLlength
-properties = [gamma, NLlength, Dlength, NofSoliton, Ratiooflengths]
+#%% Plot the final electric field intensity (time-integrated)
+intensity = np.sum(np.abs(E)**2, axis=0)
+plt.figure(figsize=(8, 6))
+plt.imshow(intensity, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', aspect='auto')
+plt.title("Time-Integrated Intensity")
+plt.xlabel("x (m)")
+plt.ylabel("y (m)")
+plt.colorbar(label="Intensity")
+plt.show()
