@@ -119,8 +119,10 @@ class THzPulse:
         """
         E = self.E_0.copy()
         lin_op = self.linear_operator()
-        E_time = []
-        for _ in tqdm(range(self.N_z), desc = 'UPPE solving...'):
+        P_record = np.zeros(self.N_z)
+        # E_time = []
+        
+        for ii in tqdm(range(self.N_z), desc = 'UPPE solving...'):
             # Step 1: Linear propagation in the frequency domain
             E_w = fft2(E, axes=(1, 2))  # Spatial Fourier Transform
             exp_factor = np.exp(np.clip(lin_op * self.dz, -50, 50))  # 지수 제한
@@ -133,91 +135,23 @@ class THzPulse:
             P_raman = self.raman_polarization(E)
             
             P_total = P_kerr * self.alpha + P_raman * (1 - self.alpha)
+            P_record[ii] = np.max(np.abs(P_total))
             
-            print(f"\nKerr Polarization Max: {np.max(np.abs(P_kerr * self.alpha))}")
-            print(f"Raman Polarization Max: {np.max(np.abs(P_raman * (1 - self.alpha)))}")
+            # print(f"\nKerr Polarization Max: {np.max(np.abs(P_kerr * self.alpha))}")
+            # print(f"Raman Polarization Max: {np.max(np.abs(P_raman * (1 - self.alpha)))}")
             
 
             # Step 3: Apply nonlinear change in the time domain
             E += 1j * np.clip(P_total * self.dz, -1e10, 1e10)  # 변화 제한
             # E += 1j * P_total * self.dz
-            E_time.append(E[:, len(self.x)//2, len(self.y)//2])
+            # E_time.append(E[:, len(self.x)//2, len(self.y)//2])
         
-        return E, np.array(E_time)
-
-# Define simulation parameters
-t = np.linspace(-5e-12, 5e-12, 256)  # Time array from (0ps to 15ps)
-x = np.linspace(-1e-2, 1e-2, 128)  # x spatial array (2cm total)
-y = np.linspace(-1e-2, 1e-2, 128)  # y spatial array (2cm total)
-z_max = 0.02  # Propagation distance (2cm)
-N_z = 500  # Number of steps
-
-
-#%% Define models
-
-model_linear = THzPulse(t, x, y, z_max, N_z, I = 1e13, w0 = 0.015, tau = 0.5e-12,
-             lambda_0 = 1.55e-6, n2 = 0, chi_3 = 1,  alpha = 1, omega_R = 1.56e13, delta_R = 5e11)
-E_linear, E_linear_time = model_linear.solve()
-#%%
-model_kerr = THzPulse(t, x, y, z_max, N_z, I = 1e13, w0 = 0.015, tau = 0.5e-12,
-             lambda_0 = 1.55e-6, n2 = 1e-12, chi_3 = 1, alpha = 1, omega_R = 1.56e13, delta_R = 5e11)
-E_kerr, E_kerr_time= model_kerr.solve()
-#%%
-
-def calculate_time_center(E_time, t):
-    intensity = np.abs(E_time)**2
-    return np.sum(t * intensity) / np.sum(intensity)
-
-
-time_center_linear = calculate_time_center(E_linear[:,64,64], t)
-time_center_kerr = calculate_time_center(E_kerr[:,64,64], t)
-# time_center_tot = calculate_time_center(E_tot_time, t)
-
-
-print(f"Linear Time Center: {time_center_linear * 1e12:.8f} ps")
-print(f"Kerr Time Center: {time_center_kerr * 1e12:.8f} ps")
-# print(f"Kerr+Raman Time Center: {time_center_tot * 1e12:.2f} ps")
-
-plt.figure(figsize=(10, 5))
-
-x_idx, y_idx = 63, 63
-
-plt.plot(t * 1e12, np.abs(E_linear[:, x_idx, y_idx])**2, label="Linear")
-plt.plot(t * 1e12, np.abs(E_kerr[:, x_idx, y_idx])**2, label="Kerr")
-
-plt.xlabel("Time (ps)")
-plt.ylabel("Intensity")
-plt.legend()
-plt.title("Pulse Intensity Comparison (Linear vs Kerr)")
-plt.grid(True)
-plt.show()
-
-#%% Spatial
-plt.plot(t * 1e12, np.abs(E_linear[:, x_idx, y_idx])**2, label="Linear")
-plt.plot(t * 1e12, np.abs(E_kerr[:, x_idx, y_idx])**2, label="Kerr")
-
-plt.xlabel("Time (ps)")
-plt.ylabel("Intensity")
-plt.legend()
-plt.title("Pulse Intensity Comparison (Linear vs Kerr)")
-plt.grid(True)
-plt.show()
-
-#%%
-
-# intensity = np.sum(np.abs(E_kerr)**2, axis=0)
-# plt.figure(figsize=(8, 6))
-# plt.imshow(intensity, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', aspect='auto')
-# plt.title("Time-Integrated Intensity")
-# plt.xlabel("x (m)")
-# plt.ylabel("y (m)")
-# plt.colorbar(label="Intensity")
-# plt.show()
-
-#%%
-# z = np.linspace(0,z_max, N_z)
-
-# plt.plot(z, E_kerr_time[:,0])
-# plt.plot(z, E_kerr_time[:,1])
-# plt.plot(z, E_kerr_time[:,2])
+        self.P_record = P_record
+        
+        return E #, np.array(E_time)
+    
+    def calculate_time_center(self, E_time, t):
+        intensity = np.abs(E_time)**2
+        return np.sum(t * intensity) / np.sum(intensity)
+    
 
