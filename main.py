@@ -8,11 +8,13 @@ import matplotlib.pyplot as plt
 from scipy.fft import fft, ifft, fft2, ifft2, fftfreq
 
 class THzPulse:
-    def __init__(self, t, x, y, z_max, N_z, lambda_0=1.55e-6, n2=1e-20, alpha=0.5, omega_R=1e13, delta_R=1e12):
+    def __init__(self, t, x, y, z_max, N_z, I = 1e13, w0 = 0.015, tau = 0.5e-12,
+                 lambda_0=1.55e-6, n2=4.5e-18, chi_3 = 1e-20, alpha=0.5, omega_R=1.56e13, delta_R=5e11):
         """
         Initialize the THzPulse simulation parameters.
 
         Parameters:
+        ===========================DOMAINS===========================
         t : array
             Time array (1D).
         x, y : array
@@ -21,19 +23,28 @@ class THzPulse:
             Maximum propagation distance (m).
         N_z : int
             Number of propagation steps.
+        ===========================LIGHT SOURCE===========================
+        I: float, optional
+            Input pulse intensity (W/m^2)
+        w0: float, optional
+            Beam waist (m)
+        tau: float, optional
+            input pulse duration(s)
         lambda_0 : float, optional
             Central wavelength (m). Default is 1.55e-6.
+        ===========================MATERIAL===========================
         n2 : float, optional
-            Nonlinear refractive index (m^2/W). Default is 1e-20.
+            Nonlinear refractive index (m^2/W). Default is 4.5e-18.
         alpha : float, optional
             Fraction of Kerr effect. Default is 0.5.
         omega_R : float, optional
-            Raman resonance angular frequency. Default is 1e13.
+            Raman resonance angular frequency. Default is 1.56e13 (for Silicon).
         delta_R : float, optional
-            Raman linewidth. Default is 1e12.
+            Raman linewidth. Default is 5e11 (for Silicon).
         """
         self.lambda_0 = lambda_0
         self.n2 = n2
+        self.chi_3 = chi_3
         self.alpha = alpha
         self.omega_R = omega_R
         self.delta_R = delta_R
@@ -46,7 +57,8 @@ class THzPulse:
         self.y = y
         self.dx = self.x[1] - self.x[0]
         self.dy = self.y[1] - self.y[0]
-        self.c = 3e8
+        self.c = 3e8 # (m/s)
+        self.epsilon_0 = 8.854e-12 # (F/m)
         self.k_0 = 2 * np.pi / self.lambda_0
         self.omega = 2 * np.pi * fftfreq(len(self.t), self.dt)
         
@@ -58,8 +70,14 @@ class THzPulse:
 
         # Initial electric field (Gaussian pulse in time and space)
         T, X, Y = np.meshgrid(self.t, self.x, self.y, indexing="ij")
-        self.E_0 = np.exp(-T**2 / (2 * (50e-15)**2)) * np.exp(-(X**2 + Y**2) / (2 * (100e-6)**2))
         
+        E_amp = np.sqrt(2 * I / self.epsilon_0 /self.c) # initial amplitude of pulse
+        w0 = w0
+        tau = tau
+        
+        self.E_0 = E_amp * np.exp(-T**2 / (2 * (tau)**2)) * np.exp(-(X**2 + Y**2) / (2 * (w0)**2))
+
+    
     def linear_operator(self):
         """
         Calculate the linear propagation operator in the frequency domain.
@@ -69,8 +87,8 @@ class THzPulse:
         k_perp2 = self.k_perp2[None, :, :]  # Expand dimensions to (1, N_x, N_y)
 
         diff = k2_omega - k_perp2
-        diff[diff < 0] = 0  # Set negative values to zero
-    
+        diff = np.where(diff > 0, diff, 0)  # eliminate negative values
+
         return -1j * np.sqrt(diff)
         
 
@@ -79,7 +97,7 @@ class THzPulse:
         Calculate Kerr effect polarization in the time domain.
         """
         intensity = np.abs(E)**2
-        return self.alpha * intensity * E
+        return self.n2  * intensity * E * self.chi_3
 
     def raman_polarization(self, E):
         """
@@ -93,7 +111,7 @@ class THzPulse:
         raman_polarization_w = g_R_w[:, None, None] * intensity_w
 
         # Convert back to time domain
-        return ifft(raman_polarization_w, axis=0) * (1 - self.alpha)
+        return ifft(raman_polarization_w, axis=0) * self.chi_3
 
     def solve(self):
         """
@@ -101,47 +119,105 @@ class THzPulse:
         """
         E = self.E_0.copy()
         lin_op = self.linear_operator()
-
+        E_time = []
         for _ in tqdm(range(self.N_z), desc = 'UPPE solving...'):
             # Step 1: Linear propagation in the frequency domain
             E_w = fft2(E, axes=(1, 2))  # Spatial Fourier Transform
-            E_w *= np.exp(lin_op * self.dz)
+            exp_factor = np.exp(np.clip(lin_op * self.dz, -50, 50))  # 지수 제한
+            E_w *= exp_factor
+            # E_w *= np.exp(lin_op * self.dz)
             E = ifft2(E_w, axes=(1, 2))
 
             # Step 2: Calculate nonlinear polarization
             P_kerr = self.kerr_polarization(E)
             P_raman = self.raman_polarization(E)
-            P_total = P_kerr + P_raman
+            
+            P_total = P_kerr * self.alpha + P_raman * (1 - self.alpha)
+            
+            print(f"\nKerr Polarization Max: {np.max(np.abs(P_kerr * self.alpha))}")
+            print(f"Raman Polarization Max: {np.max(np.abs(P_raman * (1 - self.alpha)))}")
+            
 
             # Step 3: Apply nonlinear change in the time domain
-            E += 1j * P_total * self.dz
-
-        return E
+            E += 1j * np.clip(P_total * self.dz, -1e10, 1e10)  # 변화 제한
+            # E += 1j * P_total * self.dz
+            E_time.append(E[:, len(self.x)//2, len(self.y)//2])
+        
+        return E, np.array(E_time)
 
 # Define simulation parameters
-t = np.linspace(-5e-13, 5e-13, 256)  # Time array
-x = np.linspace(-1e-3, 1e-3, 128)  # x spatial array
-y = np.linspace(-1e-3, 1e-3, 128)  # y spatial array
-z_max = 0.01  # Propagation distance (m)
-N_z = 100  # Number of steps
+t = np.linspace(-5e-12, 5e-12, 256)  # Time array from (0ps to 15ps)
+x = np.linspace(-1e-2, 1e-2, 128)  # x spatial array (2cm total)
+y = np.linspace(-1e-2, 1e-2, 128)  # y spatial array (2cm total)
+z_max = 0.02  # Propagation distance (2cm)
+N_z = 500  # Number of steps
 
-# Create the THzPulse model and solve it
-model = THzPulse(t, x, y, z_max, N_z)
-E = model.solve()
-#%% plot
-x_pos = 64
-y_pos = 65
 
-plt.plot(t*10e12, np.abs(E[:,x_pos,y_pos])**2)
+#%% Define models
 
-plt.xlabel('Time (ps)')
+model_linear = THzPulse(t, x, y, z_max, N_z, I = 1e13, w0 = 0.015, tau = 0.5e-12,
+             lambda_0 = 1.55e-6, n2 = 0, chi_3 = 1,  alpha = 1, omega_R = 1.56e13, delta_R = 5e11)
+E_linear, E_linear_time = model_linear.solve()
+#%%
+model_kerr = THzPulse(t, x, y, z_max, N_z, I = 1e13, w0 = 0.015, tau = 0.5e-12,
+             lambda_0 = 1.55e-6, n2 = 1e-12, chi_3 = 1, alpha = 1, omega_R = 1.56e13, delta_R = 5e11)
+E_kerr, E_kerr_time= model_kerr.solve()
+#%%
 
-#%% Plot the final electric field intensity (time-integrated)
-intensity = np.sum(np.abs(E)**2, axis=0)
-plt.figure(figsize=(8, 6))
-plt.imshow(intensity, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', aspect='auto')
-plt.title("Time-Integrated Intensity")
-plt.xlabel("x (m)")
-plt.ylabel("y (m)")
-plt.colorbar(label="Intensity")
+def calculate_time_center(E_time, t):
+    intensity = np.abs(E_time)**2
+    return np.sum(t * intensity) / np.sum(intensity)
+
+
+time_center_linear = calculate_time_center(E_linear[:,64,64], t)
+time_center_kerr = calculate_time_center(E_kerr[:,64,64], t)
+# time_center_tot = calculate_time_center(E_tot_time, t)
+
+
+print(f"Linear Time Center: {time_center_linear * 1e12:.8f} ps")
+print(f"Kerr Time Center: {time_center_kerr * 1e12:.8f} ps")
+# print(f"Kerr+Raman Time Center: {time_center_tot * 1e12:.2f} ps")
+
+plt.figure(figsize=(10, 5))
+
+x_idx, y_idx = 63, 63
+
+plt.plot(t * 1e12, np.abs(E_linear[:, x_idx, y_idx])**2, label="Linear")
+plt.plot(t * 1e12, np.abs(E_kerr[:, x_idx, y_idx])**2, label="Kerr")
+
+plt.xlabel("Time (ps)")
+plt.ylabel("Intensity")
+plt.legend()
+plt.title("Pulse Intensity Comparison (Linear vs Kerr)")
+plt.grid(True)
 plt.show()
+
+#%% Spatial
+plt.plot(t * 1e12, np.abs(E_linear[:, x_idx, y_idx])**2, label="Linear")
+plt.plot(t * 1e12, np.abs(E_kerr[:, x_idx, y_idx])**2, label="Kerr")
+
+plt.xlabel("Time (ps)")
+plt.ylabel("Intensity")
+plt.legend()
+plt.title("Pulse Intensity Comparison (Linear vs Kerr)")
+plt.grid(True)
+plt.show()
+
+#%%
+
+# intensity = np.sum(np.abs(E_kerr)**2, axis=0)
+# plt.figure(figsize=(8, 6))
+# plt.imshow(intensity, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', aspect='auto')
+# plt.title("Time-Integrated Intensity")
+# plt.xlabel("x (m)")
+# plt.ylabel("y (m)")
+# plt.colorbar(label="Intensity")
+# plt.show()
+
+#%%
+# z = np.linspace(0,z_max, N_z)
+
+# plt.plot(z, E_kerr_time[:,0])
+# plt.plot(z, E_kerr_time[:,1])
+# plt.plot(z, E_kerr_time[:,2])
+
