@@ -119,15 +119,13 @@ class THzPulse:
         """
         E = self.E_0.copy()
         lin_op = self.linear_operator()
+        
         P_record = np.zeros(self.N_z)
-        # E_time = []
         
         for ii in tqdm(range(self.N_z), desc = 'UPPE solving...'):
             # Step 1: Linear propagation in the frequency domain
             E_w = fft2(E, axes=(1, 2))  # Spatial Fourier Transform
-            exp_factor = np.exp(np.clip(lin_op * self.dz, -50, 50))  # 지수 제한
-            E_w *= exp_factor
-            # E_w *= np.exp(lin_op * self.dz)
+            E_w *= np.exp(lin_op * self.dz)
             E = ifft2(E_w, axes=(1, 2))
 
             # Step 2: Calculate nonlinear polarization
@@ -136,20 +134,14 @@ class THzPulse:
             
             P_total = P_kerr * self.alpha + P_raman * (1 - self.alpha)
             P_record[ii] = np.max(np.abs(P_total))
-            
-            # print(f"\nKerr Polarization Max: {np.max(np.abs(P_kerr * self.alpha))}")
-            # print(f"Raman Polarization Max: {np.max(np.abs(P_raman * (1 - self.alpha)))}")
-            
 
             # Step 3: Apply nonlinear change in the time domain
             E += 1j * np.clip(P_total * self.dz, -1e10, 1e10)  # 변화 제한
-            # E += 1j * P_total * self.dz
-            # E_time.append(E[:, len(self.x)//2, len(self.y)//2])
-        
+            
         self.P_record = P_record
         
-        return E #, np.array(E_time)
-    
+        return E
+        
     def calculate_time_center(self, E_time, t):
         intensity = np.abs(E_time)**2
         return np.sum(t * intensity) / np.sum(intensity)
