@@ -126,4 +126,43 @@ for ii in range(len(n2_candi)):
     np.save(f'{dir_path}\\result\\sweep_n2\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_temp.npy', temporal_map)
     np.save(f'{dir_path}\\result\\sweep_n2\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_phase.npy', phase_shift)
 
+#%% lambda_sweep
 
+I0 = 1e8  # Peak intensity [W/m^2]
+w0 = 0.5e-4  # Beam waist [m]
+tau = 0.01e-12  # Temporal width (short pulse, in seconds)
+Lx = 1e-3  # Spatial simulation window [m]
+T = 0.1e-12  # Temporal simulation window [s]
+N = 1024 # Grid size (for spatial and time resolution)
+Lz = 0.02  # Propagation length [m]
+dz = 0.0005  # Step size [m]
+z_steps = int(Lz/dz)
+t = np.linspace(-T/2, T/2, N)
+x = np.linspace(-Lx/2, Lx/2, N)
+n0 = 3.48 # Si refractive index
+beta2 = 1e-29 # GVD coefficient
+n2 = 1e-15
+
+# Define candidate range
+lambda_candi = np.array([0.5e-6, 0.6e-6, 0.7e-6, 0.8e-6])
+
+# Ensuring directory existnace
+if not os.path.exists(f'{dir_path}\\result\\sweep_lambda\\'):
+    os.mkdir(f'{dir_path}\\result\\sweep_lambda\\')
+
+# Sweep through n2
+for ii in range(len(lambda_candi)):
+    
+    lambda_0 = lambda_candi[ii]
+    
+    # Calculating
+    model = THzProp(w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0)
+    spatial_map, temporal_map, E_list, phase_shift = model.propagate()
+    
+    #Saving
+    np.save(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E0.npy', model.E0)
+    np.save(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E_list.npy', E_list)
+    np.save(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_spat.npy', spatial_map)
+    np.save(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_temp.npy', temporal_map)
+    np.save(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_phase.npy', phase_shift)
+    
