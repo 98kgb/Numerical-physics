@@ -337,3 +337,4 @@ plt.xlabel(r'$n_2$')
 plt.ylabel('Maximum Accumulated Phase shift')
 plt.title(rf'$beta_2$: {beta2}')
 plt.legend()
+
