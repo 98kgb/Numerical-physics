@@ -1,149 +1,232 @@
-# -*- coding: utf-8 -*-
-"""
-THz Pulse Propagation using UPPE
-"""
-from tqdm import tqdm
 import numpy as np
+from numpy.fft import fft2, ifft2, fftfreq
+from numpy.fft import fft, ifft
 import matplotlib.pyplot as plt
-from scipy.fft import fft, ifft, fft2, ifft2, fftfreq
+from tqdm import tqdm
 
-class THzPulse:
-    def __init__(self, t, x, y, z_max, N_z, I = 1e13, w0 = 0.015, tau = 0.5e-12,
-                 lambda_0=1.55e-6, n2=4.5e-18, chi_3 = 1e-20, alpha=0.5, omega_R=1.56e13, delta_R=5e11):
+class THzProp:
+    def __init__(self, w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0, verbose = False):
+        
         """
-        Initialize the THzPulse simulation parameters.
+        Initialize the parameters for space-time Kerr effect propagation.
 
         Parameters:
-        ===========================DOMAINS===========================
-        t : array
-            Time array (1D).
-        x, y : array
-            Spatial arrays for x and y directions (1D).
-        z_max : float
-            Maximum propagation distance (m).
-        N_z : int
-            Number of propagation steps.
-        ===========================LIGHT SOURCE===========================
-        I: float, optional
-            Input pulse intensity (W/m^2)
-        w0: float, optional
-            Beam waist (m)
-        tau: float, optional
-            input pulse duration(s)
-        lambda_0 : float, optional
-            Central wavelength (m). Default is 1.55e-6.
-        ===========================MATERIAL===========================
-        n2 : float, optional
-            Nonlinear refractive index (m^2/W). Default is 4.5e-18.
-        alpha : float, optional
-            Fraction of Kerr effect. Default is 0.5.
-        omega_R : float, optional
-            Raman resonance angular frequency. Default is 1.56e13 (for Silicon).
-        delta_R : float, optional
-            Raman linewidth. Default is 5e11 (for Silicon).
+        w0 (float): Beam waist [m]
+        tau (float): Temporal width [s]
+        lambda_0 (float): Wavelength [m]
+        Lx (float): Spatial grid length [m]
+        T (float): Temporal grid length [s]
+        N (int): Grid size (spatial and temporal resolution)
+        dz (float): Propagation step size [m]
+        Lz (float): Total propagation distance [m]
+        n0 (float): Linear refractive index
+        n2 (float): Nonlinear refractive index [m^2/W]
+        beta2 (float): Group velocity dispersion coefficient [s^2/m]
+        I0 (float): Peak intensity [W/m^2]
         """
-        self.lambda_0 = lambda_0
-        self.n2 = n2
-        self.chi_3 = chi_3
-        self.alpha = alpha
-        self.omega_R = omega_R
-        self.delta_R = delta_R
-        self.z_max = z_max
-        self.N_z = N_z
-        self.dz = z_max / N_z
-        self.t = t
-        self.dt = self.t[1] - self.t[0]
-        self.x = x
-        self.y = y
-        self.dx = self.x[1] - self.x[0]
-        self.dy = self.y[1] - self.y[0]
-        self.c = 3e8 # (m/s)
-        self.epsilon_0 = 8.854e-12 # (F/m)
-        self.k_0 = 2 * np.pi / self.lambda_0
-        self.omega = 2 * np.pi * fftfreq(len(self.t), self.dt)
+        self.verbose = verbose # True to print the calculation procedure
         
-        # Transverse spatial frequency arrays
-        self.k_x = 2 * np.pi * fftfreq(len(self.x), self.dx)
-        self.k_y = 2 * np.pi * fftfreq(len(self.y), self.dy)
-        self.k_x, self.k_y = np.meshgrid(self.k_x, self.k_y)
-        self.k_perp2 = self.k_x**2 + self.k_y**2
-
-        # Initial electric field (Gaussian pulse in time and space)
-        T, X, Y = np.meshgrid(self.t, self.x, self.y, indexing="ij")
+        # Physical constants
+        self.epsilon_0 = 8.854e-12 # Vacuum permittivity [F/m]
+        self.mu0 = 4 * np.pi * 1e-7  # Vacuum permeability [H/m]
+        self.c = 3e8 # Speed of light [m/s]
         
-        E_amp = np.sqrt(2 * I / self.epsilon_0 /self.c) # initial amplitude of pulse
-        w0 = w0
-        tau = tau
+        # Material parameters
+        self.n0 = n0  # Linear refractive index
+        self.n2 = n2  # Nonlinear refractive index
+        self.beta2 = beta2  # Group velocity dispersion coefficient
+        # Third-order nonlinear susceptibility derived from n2
+        self.chi3 = (4 * self.n0 * self.epsilon_0 * self.c * self.n2) / 3
         
-        self.E_0 = E_amp * np.exp(-T**2 / (2 * (tau)**2)) * np.exp(-(X**2 + Y**2) / (2 * (w0)**2))
-
-    
-    def linear_operator(self):
-        """
-        Calculate the linear propagation operator in the frequency domain.
-        """
-        k2_omega = (self.omega / self.c)**2
-        k2_omega = k2_omega[:, None, None]  # Expand dimensions to (N_t, 1, 1)
-        k_perp2 = self.k_perp2[None, :, :]  # Expand dimensions to (1, N_x, N_y)
-
-        diff = k2_omega - k_perp2
-        diff = np.where(diff > 0, diff, 0)  # eliminate negative values
-
-        return -1j * np.sqrt(diff)
+        # Pulse parameters
+        self.I0 = I0  # Peak intensity
+        self.w0 = w0  # Beam waist
+        self.tau = tau  # Temporal width
+        self.lambda_0 = lambda_0  # Central wavelength
         
-
-    def kerr_polarization(self, E):
-        """
-        Calculate Kerr effect polarization in the time domain.
-        """
-        intensity = np.abs(E)**2
-        return self.n2  * intensity * E * self.chi_3
-
-    def raman_polarization(self, E):
-        """
-        Calculate Raman effect polarization in the frequency domain and convert to time domain.
-        """
-        intensity = np.abs(E)**2
-        intensity_w = fft(intensity, axis=0)  # Fourier Transform along the time axis
+        # Dimensional parameters
+        self.k0 = 2 * np.pi / lambda_0  # Central wavevector
+        self.Lx = Lx  # Spatial grid length
+        self.T = T  # Temporal grid length
+        self.Nx = N  # Number of spatial grid points
+        self.Nt = N  # Number of temporal grid points
+        self.dx = Lx / N  # Spatial grid resolution
+        self.dt = T / N  # Temporal grid resolution
+        self.dz = dz  # Propagation step size
         
-        # Raman response in frequency domain
-        g_R_w = self.omega_R**2 / (self.omega_R**2 + 2j * self.omega * self.delta_R - self.omega**2)
-        raman_polarization_w = g_R_w[:, None, None] * intensity_w
-
-        # Convert back to time domain
-        return ifft(raman_polarization_w, axis=0) * self.chi_3
-
-    def solve(self):
-        """
-        Solve the THz pulse propagation using the Split-Step Fourier Method.
-        """
-        E = self.E_0.copy()
-        lin_op = self.linear_operator()
+        self.Lz = Lz  # Total propagation distance
         
-        P_record = np.zeros(self.N_z)
-        
-        for ii in tqdm(range(self.N_z), desc = 'UPPE solving...'):
-            # Step 1: Linear propagation in the frequency domain
-            E_w = fft2(E, axes=(1, 2))  # Spatial Fourier Transform
-            E_w *= np.exp(lin_op * self.dz)
-            E = ifft2(E_w, axes=(1, 2))
+        # Initialize spatial and temporal grids
+        self.x = np.linspace(-Lx/2, Lx/2, N)  # Spatial grid
+        self.t = np.linspace(-T/2, T/2, N)   # Temporal grid
+        self.X, self.T = np.meshgrid(self.x, self.t)  # Space-time grid
+        self.r = self.X  # Radial distance (1D spatial dimension assumed)
 
-            # Step 2: Calculate nonlinear polarization
-            P_kerr = self.kerr_polarization(E)
-            P_raman = self.raman_polarization(E)
+        # Initialize spatial k-space (kx) and angular frequency (omega)
+        self.kx = fftfreq(N, self.dx) * 2 * np.pi  # Spatial frequency
+        self.kz = np.sqrt(np.maximum(self.k0**2 - self.kx**2, 0) + 0j)  # Longitudinal wavevector component
+        self.omega_0 = 2 * np.pi * self.c / self.lambda_0  # Central angular frequency
+        self.omega = fftfreq(N, self.dt) * 2 * np.pi - self.omega_0  # Angular frequency deviation
+
+        # Meshgrid for k-space and angular frequency
+        self.KZ, self.OMEGA = np.meshgrid(self.kz, self.omega)
+        
+        # Define initial Gaussian beam in space and time
+        self.E0 = np.sqrt(2 * self.I0 * self.epsilon_0 * self.c * self.n0) \
+                  * np.exp(-self.r**2 / self.w0**2) \
+                  * np.exp(-self.T**2 / self.tau**2) \
+                  * np.cos(self.omega_0 * self.T)
+        
+        self.z_steps = int(Lz / self.dz)  # Number of steps in propagation
+        # self.z_steps = 1
+    def propagate(self):
+        """
+        Simulate the propagation of the pulse over the specified distance.
+        
+        Returns:
+        intensity_map (numpy.ndarray): 2D array of intensity over propagation.
+        E (numpy.ndarray): Final electric field after propagation.
+        """
+        
+        # Copy the initial electric field
+        E = self.E0.copy()
+        E_list = []
+        spatial_map = []  # Store spatial intensity profiles for visualization
+        temporal_map = []  # Store temporal intensity profiles for visualization
+        phase_shift = np.zeros([2, self.z_steps]) # Store phase shift profile.
+        
+        # Loop through each propagation step
+        for ii in tqdm(range(self.z_steps), desc = 'Solving UPPE...'):
             
-            P_total = P_kerr * self.alpha + P_raman * (1 - self.alpha)
-            P_record[ii] = np.max(np.abs(P_total))
-
-            # Step 3: Apply nonlinear change in the time domain
-            E += 1j * np.clip(P_total * self.dz, -1e10, 1e10)  # 변화 제한
+            # Linear propagation
+            E = fft2(E) # Fourier transform of the electric field
+            E *= np.exp(-1j * self.KZ * self.dz) # Apply diffraction effect
+            E *= np.exp(-1j * (self.OMEGA * self.n0 / self.c) * self.dz) # Apply refractive index phase shift
+            E *= np.exp(-1j * (self.beta2 * self.OMEGA**2) * self.dz) # Apply group velocity dispersion (GVD)
+            E = ifft2(E) # Inverse Fourier transform back to space-time domain
             
-        self.P_record = P_record
-        
-        return E
-        
-    def calculate_time_center(self, E_time, t):
-        intensity = np.abs(E_time)**2
-        return np.sum(t * intensity) / np.sum(intensity)
-    
+            # Kerr effect calculation
+            d_phase, dE = self.Kerr(E)
 
+            # Update electric field with Kerr effect polarization and phase
+            E *= np.exp(1j * d_phase)
+            E += dE * self.dz
+            
+            # Store the intensity profile at the central time and space slice
+            spatial_map.append(E[self.Nt // 2, :])
+            temporal_map.append(E[:, self.Nx//2])
+            
+            # Store phase shift information
+            phase_shift[0,ii] = np.max((abs(self.beta2 * self.OMEGA**2)) * self.dz)
+            phase_shift[1,ii] = np.max(abs(d_phase))
+            
+            # Calculate and store total energy at this step
+            total_energy = np.sum(np.abs(E)**2) * self.dx * self.dt
+            E_list.append(total_energy)
+            
+            # Print calculation procedure if verbose is True
+            if self.verbose:
+                print('\nGVD:', np.max((abs(self.beta2 * self.OMEGA**2)) * self.dz))
+                print('Kerr:', np.max(abs(d_phase)),'\n')
+                print(f'E max: {np.max(E):.1e}', )
+                
+        return np.array(spatial_map), np.array(temporal_map), E_list, phase_shift
+        
+    def Kerr(self, E):
+        # Compute intensity and clip it to mitigate overflow.
+        intensity = np.abs(E)**2
+        clip_max = self.I0 * 2
+        intensity = np.clip(intensity, 0, clip_max)
+        
+        # Kerr effect
+        d_phase = self.k0 * self.n2 * intensity * self.dz
+        
+        P_kerr = self.epsilon_0 * self.chi3 * E * intensity
+        dE = 1j * (self.mu0 * self.OMEGA**2 / np.sqrt(self.KZ**2 + 0j)) * P_kerr
+        
+        return d_phase, dE
+        
+# Main program for testing
+if __name__ == '__main__':
+    
+    # Main program for testing
+    I0 = 1e8  # Peak intensity [W/m^2]
+    w0 = 0.5e-4  # Beam waist [m]
+    tau = 0.01e-12  # Temporal width (short pulse, in seconds)
+    lambda_0 = 1.55e-6  # Central wavelength [m]
+    Lx = 1e-3  # Spatial simulation window [m]
+    T = 0.1e-12  # Temporal simulation window [s]
+    N = 1024 # Grid size (for spatial and time resolution)
+    Lz = 0.02  # Propagation length [m]
+    dz = 0.0005  # Step size [m]
+    z_steps = int(Lz/dz)
+    n0 = 3.48 # Si refractive index
+    
+    n2 = 1e-15 # Nonlinear refractive index
+    beta2 = -5e-30 # GVD coefficient
+    
+    # Define model
+    model = THzProp(w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0)
+    
+    # Propagate
+    spatial_map, temporal_map, E_list, phase_shift = model.propagate()
+    
+    # visualization
+    t = model.t
+    x = model.x
+    
+    # reconstruct Gaussian shape
+    E0 = temporal_map[0, :]
+    E_con = fft(E0)
+    E_con[int(N/2):] = 0+1j*0
+    E_con = ifft(E_con)
+    
+    # Final pulse: Ef
+    Ef = temporal_map[-1,:]
+    Ef = np.real(Ef)
+    Ef_con = fft(Ef)
+    Ef_con[int(N/2):] = 0 + 1j*0
+    Ef_con = ifft(Ef_con)
+    
+    map_con = np.zeros(np.shape(temporal_map))
+    
+    for kk in range(temporal_map.shape[0]):
+        E_temp = temporal_map[kk, :]
+        E_temp = np.real(E_temp)
+        E_temp = fft(E_temp)
+        E_temp[int(N/2):] = 0 + 1j*0
+        E_temp = ifft(E_temp)
+        map_con[kk,:] = 2*abs(E_temp)
+    
+    _, ax = plt.subplots(1,3, figsize = (24,8))
+    fontsize = 24
+    ax[0].plot(t, E0, 'r', linestyle='--')
+    ax[0].plot(t, 2*np.abs(E_con), 'r', label="Initial Pulse")    
+    ax[0].plot(t, Ef, 'b', linestyle='--')
+    ax[0].plot(t, 2*np.abs(Ef_con), 'b', label="Final Pulse")
+    ax[0].set_title(f'beta2: {beta2}  n2: {n2}', fontsize = fontsize)
+    ax[0].set_xlabel("Time [s]", fontsize = fontsize)
+    ax[0].set_ylabel("Amplitude", fontsize = fontsize)
+    
+    # Calculate global vmin and vmax across both datasets
+    vmin = min(abs(spatial_map).min(), abs(map_con).min())
+    vmax = max(abs(spatial_map).max(), abs(map_con).max())
+    
+    # Spatial evolution plot
+    ax[1].imshow(abs(spatial_map), extent=[x.min(), x.max(), Lz, 0], aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
+    ax[1].set_xlabel("X direction [m]", fontsize = fontsize)
+    ax[1].set_ylabel("Propagation Distance [m]", fontsize = fontsize)
+    
+    # Temporal evolution plot
+    ax[2].imshow(abs(map_con), extent=[t.min()*1e12, t.max()*1e12, Lz, 0], aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
+    ax[2].set_xlabel("Time [ps]", fontsize=18)
+    ax[2].set_ylabel("Propagation Distance [m]", fontsize = fontsize)
+    
+    # set tick parameters
+    labelsize = 18
+    ax[0].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
+    ax[1].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
+    ax[2].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
+    
+    plt.tight_layout()
+    
