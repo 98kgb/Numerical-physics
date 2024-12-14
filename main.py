@@ -1,3 +1,14 @@
+"""
+This Python script simulates the propagation of a terahertz (THz)
+
+electromagnetic pulse in space-time, including both linear effects
+
+(diffraction and group velocity dispersion, GVD) and nonlinear effects (Kerr effect).
+
+It uses the Unidirectional Pulse Propagation Equation (UPPE) to model these effects.
+"""
+
+
 import numpy as np
 from numpy.fft import fft2, ifft2, fftfreq
 from numpy.fft import fft, ifft
