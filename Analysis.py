@@ -338,3 +338,96 @@ plt.ylabel('Maximum Accumulated Phase shift')
 plt.title(rf'$beta_2$: {beta2}')
 plt.legend()
 
+#%% visualization for lambda sweep
+
+I0 = 1e8  # Peak intensity [W/m^2]
+w0 = 0.5e-4  # Beam waist [m]
+tau = 0.01e-12  # Temporal width (short pulse, in seconds)
+Lx = 1e-3  # Spatial simulation window [m]
+T = 0.1e-12  # Temporal simulation window [s]
+N = 1024 # Grid size (for spatial and time resolution)
+Lz = 0.02  # Propagation length [m]
+dz = 0.0005  # Step size [m]
+z_steps = int(Lz/dz)
+t = np.linspace(-T/2, T/2, N)
+x = np.linspace(-Lx/2, Lx/2, N)
+n0 = 3.48 # Si refractive index
+beta2 = 1e-29 # GVD coefficient
+n2 = 1e-15
+
+# Define candidate range
+lambda_candi = np.array([0.5e-6, 0.6e-6, 0.7e-6, 0.8e-6])
+
+_, ax = plt.subplots(3,len(lambda_candi), figsize = (24,18))
+
+# Sweep through n2
+for ii in range(len(lambda_candi)):
+    
+    lambda_0 = lambda_candi[ii]
+    
+    # Loading
+    E0 = np.load(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E0.npy')
+    E_list = np.load(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E_list.npy')
+    spatial_map = np.load(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_spat.npy')
+    temporal_map = np.load(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_temp.npy')
+    phase_shift = np.load(f'{dir_path}\\result\\sweep_lambda\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_phase.npy')
+    
+    # Reconstruct pulse
+    E0 = E0[:, N//2]
+    E_con = fft(E0)
+    E_con[int(N/2):] = 0+1j*0
+    E_con = ifft(E_con)
+    
+    Ef = temporal_map[int(z_steps//cut_point)-1,:]
+    Ef = np.real(Ef)
+    Ef_con = fft(Ef)
+    Ef_con[int(N/2):] = 0 + 1j*0
+    Ef_con = ifft(Ef_con)
+    
+    map_con = np.zeros(np.shape(temporal_map))
+
+    for kk in range(temporal_map.shape[0]):
+        E_temp = temporal_map[kk, :]
+        E_temp = np.real(E_temp)
+        E_temp = fft(E_temp)
+        E_temp[int(N/2):] = 0 + 1j*0
+        E_temp = ifft(E_temp)
+        map_con[kk,:] = 2*abs(E_temp)
+    
+    
+    # Plot pulse
+    ax[0,ii].plot(t, E0, 'r', linestyle='--')
+    ax[0,ii].plot(t, 2*np.abs(E_con), 'r', label="Initial Pulse")    
+    ax[0,ii].plot(t, Ef, 'b', linestyle='--')
+    ax[0,ii].plot(t, 2*np.abs(Ef_con), 'b', label="Final Pulse")
+    ax[0,ii].set_title(f'lambda: {lambda_0}', fontsize = 20)
+    ax[0,ii].set_xlabel("Time [s]", fontsize=20)
+    ax[0,ii].set_ylabel("E-field", fontsize=20)
+    ax[0,ii].ticklabel_format(axis="y", style="sci", scilimits=(-2, 2))
+    ax[0,ii].yaxis.get_offset_text().set_fontsize(16)
+    ax[0,ii].legend()
+    
+    E_peak.append(max(2*np.abs(Ef_con)))
+        
+    # Calculate global vmin and vmax across both datasets
+    vmin = min(abs(spatial_map).min(), abs(map_con).min())
+    vmax = max(abs(spatial_map).max(), abs(map_con).max())
+    
+    # Spatial evolution plot
+    ax[1, ii].imshow(abs(spatial_map[:int(z_steps//cut_point), :]), extent=[x.min()*1e3, x.max()*1e3, Lz/cut_point*1e3, 0],
+                     aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
+    ax[1, ii].set_xlabel("X direction [mm]", fontsize=20)
+    ax[1, ii].set_ylabel("Propagation Distance [mm]", fontsize=20)
+    
+    # Temporal evolution plot
+    ax[2, ii].imshow(abs(map_con[:int(z_steps//cut_point), :]), extent=[t.min()*1e12, t.max()*1e12, Lz/cut_point*1e3, 0],
+                      aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
+    ax[2, ii].set_xlabel("Time [ps]", fontsize=18)
+    ax[2, ii].set_ylabel("Propagation Distance [mm]", fontsize=18)
+
+for axis in ax.flatten():
+    axis.tick_params(axis='both', which='major', labelsize=18)
+    
+plt.suptitle(rf"THz Pulse Propagation Analysis for Varying $\lambda$ with \n $I_0: {I0:.1e}$  $\beta_2$: {beta2}  $n_2: {n2}$  ", fontsize=24, y=1.02)
+plt.tight_layout()
+plt.show()
