@@ -1,60 +1,129 @@
-# -*- coding: utf-8 -*-
 """
-This code search proper parameter to observe the time delay which originated form Kerr effect.
+THz Propagation Simulation: The code simulates the propagation of a THz electromagnetic pulse,
 
-The candidate paramters are n2 (nonlinearity index), and N_z (resolution of z direction).
+including linear (diffraction, GVD) and nonlinear (Kerr effect) effects using specified parameters.
 
-@author: Gibaek
+Parameter Sweeps: It evaluates the effect of varying GVD coefficient (beta2) and nonlinear index (n2)
+
+on pulse dynamics and saves results for each parameter set.
+
+Result Storage: The code saves the initial pulse, propagated fields, and phase shifts as .npy files for analysis.
 """
 
+import os
+import sys
+
+# Add current directory to system path to enable module imports
+dir_path = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(dir_path)
 
 import numpy as np
-import pandas as pd
-from main import THzPulse
+from main import THzProp
 
-# sweep parameters
-n2_candi = [1e-12, 1e-13, 1e-14, 1e-15]
-N_z_candi = [100,200,300,400,500]
+#%% Diffraction calculation
+I0 = 1e8  # Peak intensity [W/m^2]
+w0 = 0.5e-4  # Beam waist [m]
+tau = 0.01e-12  # Temporal width (short pulse, in seconds)
+lambda_0 = 1.55e-6  # Central wavelength [m]
+Lx = 1e-3  # Spatial simulation window [m]
+T = 0.1e-12  # Temporal simulation window [s]
+N = 1024 # Grid size (for spatial and time resolution)
+Lz = 0.02  # Propagation length [m]
+dz = 0.0005  # Step size [m]
+z_steps = int(Lz/dz)
+t = np.linspace(-T/2, T/2, N)
+x = np.linspace(-Lx/2, Lx/2, N)
+n0 = 3.48 # Si refractive index
+n2 = 0  # Nonlinear refractive index [m^2/W]
+beta2 = 0 # GVD coefficient
 
-# Define simulation parameters
-t = np.linspace(-5e-12, 5e-12, 256)  # Time array from (0ps to 15ps)
-x = np.linspace(-1e-2, 1e-2, 128)  # x spatial array (2cm total)
-y = np.linspace(-1e-2, 1e-2, 128)  # y spatial array (2cm total)
-z_max = 0.02  # Propagation distance (2cm)
+# Calculating
+model = THzProp(w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0)
+spatial_map, temporal_map, E_list, phase_shift = model.propagate()
 
-x_idx, y_idx = 63, 63
+# Saving result
+np.save(f'{dir_path}\\result\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E0.npy', model.E0)
+np.save(f'{dir_path}\\result\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E_list.npy', E_list)
+np.save(f'{dir_path}\\result\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_spat.npy', spatial_map)
+np.save(f'{dir_path}\\result\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_temp.npy', temporal_map)
 
-columns = ['Linear E', 'Kerr E', 'Linear P', 'Kerr P', 'Linear t ave', 'Kerr t ave']
+#%% Beta dependance calculation
+I0 = 1e8  # Peak intensity [W/m^2]
+w0 = 0.5e-4  # Beam waist [m]
+tau = 0.01e-12  # Temporal width (short pulse, in seconds)
+lambda_0 = 0.6e-6  # Central wavelength [m]
+Lx = 1e-3  # Spatial simulation window [m]
+T = 0.1e-12  # Temporal simulation window [s]
+N = 1024 # Grid size (for spatial and time resolution)
+Lz = 0.02  # Propagation length [m]
+dz = 0.0005  # Step size [m]
+z_steps = int(Lz/dz)
+t = np.linspace(-T/2, T/2, N)
+x = np.linspace(-Lx/2, Lx/2, N)
+n0 = 3.48 # Si refractive index
+n2 = 0  # Nonlinear refractive index [m^2/W]
 
+# Define candidates
+beta2_candi = np.array([1e-32, 1e-31, 1e-30, 1e-29])
+
+# Ensuring directory existnace
+if not os.path.exists(f'{dir_path}\\result\\sweep_beta\\'):
+    os.mkdir(f'{dir_path}\\result\\sweep_beta\\')
+
+# Sweep through beta2
+for ii in range(len(beta2_candi)):
+        
+    beta2 = beta2_candi[ii]
+    
+    # Calculating
+    model = THzProp(w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0)    
+    spatial_map, temporal_map, E_list, phase_shift = model.propagate()
+    
+    # Saving result
+    np.save(f'{dir_path}\\result\\sweep_beta\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E0.npy', model.E0)
+    np.save(f'{dir_path}\\result\\sweep_beta\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E_list.npy', E_list)
+    np.save(f'{dir_path}\\result\\sweep_beta\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_spat.npy', spatial_map)
+    np.save(f'{dir_path}\\result\\sweep_beta\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_temp.npy', temporal_map)
+    np.save(f'{dir_path}\\result\\sweep_beta\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_phase.npy', phase_shift)
+    
+    
+#%% n2 sweep
+I0 = 1e8  # Peak intensity [W/m^2]
+w0 = 0.5e-4  # Beam waist [m]
+tau = 0.01e-12  # Temporal width (short pulse, in seconds)
+lambda_0 = 0.6e-6  # Central wavelength [m]
+Lx = 1e-3  # Spatial simulation window [m]
+T = 0.1e-12  # Temporal simulation window [s]
+N = 1024 # Grid size (for spatial and time resolution)
+Lz = 0.02  # Propagation length [m]
+dz = 0.0005  # Step size [m]
+z_steps = int(Lz/dz)
+t = np.linspace(-T/2, T/2, N)
+x = np.linspace(-Lx/2, Lx/2, N)
+n0 = 3.48 # Si refractive index
+beta2 = 1e-29 # GVD coefficient
+
+# Define candidate range
+n2_candi = np.array([1e-12, 1e-13, 1e-14, 1e-15])
+
+# Ensuring directory existnace
+if not os.path.exists(f'{dir_path}\\result\\sweep_n2\\'):
+    os.mkdir(f'{dir_path}\\result\\sweep_n2\\')
+
+# Sweep through n2
 for ii in range(len(n2_candi)):
-    for jj in range(len(N_z_candi)):
-        
-        n2 = n2_candi[ii]
-        N_z = N_z_candi[jj]
-        
-        record = np.zeros([max(len(t), N_z), 6], dtype=np.complex128)
+    
+    n2 = n2_candi[ii]
+    
+    # Calculating
+    model = THzProp(w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0)
+    spatial_map, temporal_map, E_list, phase_shift = model.propagate()
+    
+    #Saving
+    np.save(f'{dir_path}\\result\\sweep_n2\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E0.npy', model.E0)
+    np.save(f'{dir_path}\\result\\sweep_n2\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_E_list.npy', E_list)
+    np.save(f'{dir_path}\\result\\sweep_n2\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_spat.npy', spatial_map)
+    np.save(f'{dir_path}\\result\\sweep_n2\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_temp.npy', temporal_map)
+    np.save(f'{dir_path}\\result\\sweep_n2\\lamda_{lambda_0}_I0_{I0}_n2_{n2}_beta2_{beta2}_phase.npy', phase_shift)
 
-        linear = THzPulse(t, x, y, z_max, N_z, I = 1e13, w0 = 0.015, tau = 0.5e-12,
-                     lambda_0 = 1.55e-6, n2 = 0, chi_3 = 1,  alpha = 1, omega_R = 1.56e13, delta_R = 5e11)
-        E_linear = linear.solve()
-        time_center_linear = linear.calculate_time_center(E_linear[:,64,64], t)
-        
-        kerr = THzPulse(t, x, y, z_max, N_z, I = 1e13, w0 = 0.015, tau = 0.5e-12,
-                     lambda_0 = 1.55e-6, n2 = n2, chi_3 = 1, alpha = 1, omega_R = 1.56e13, delta_R = 5e11)
-        E_kerr = kerr.solve()
-        time_center_kerr = kerr.calculate_time_center(E_kerr[:,64,64], t)
-        
-        record[:len(t),0] = E_linear[:, x_idx, y_idx]
-        record[:len(t),1] = E_kerr[:, x_idx, y_idx]
-        record[:N_z,2] = linear.P_record[:N_z]
-        record[:N_z,3] = kerr.P_record[:N_z]
-        record[0,4] = time_center_linear
-        record[0,5] = time_center_kerr
-        
-        df_tot = pd.DataFrame(record, columns = columns)
-        df_tot.to_csv(f'./result/n2_{n2}_Nz_{N_z}.csv')
-        
-        print(f"Linear Time Center: {time_center_linear * 1e12:.8f} ps")
-        print(f"Kerr Time Center: {time_center_kerr * 1e12:.8f} ps")
 
-        
