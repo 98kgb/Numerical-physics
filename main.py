@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 class THzProp:
-    def __init__(self, w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0, verbose = False):
+    def __init__(self, w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0, chirp = -1e28, verbose = False):
         
         """
         Initialize the parameters for space-time Kerr effect propagation.
@@ -82,13 +82,17 @@ class THzProp:
         # Meshgrid for k-space and angular frequency
         self.KZ, self.OMEGA = np.meshgrid(self.kz, self.omega)
         
+        # Define chirp paramters
+        self.chirp = chirp
+        
         # Define initial Gaussian beam in space and time
         self.E0 = np.sqrt(2 * self.I0 * self.epsilon_0 * self.c * self.n0) \
                   * np.exp(-self.r**2 / self.w0**2) \
                   * np.exp(-self.T**2 / self.tau**2) \
-                  * np.cos(self.omega_0 * self.T)
+                  * np.cos(self.omega_0 * self.T + self.chirp *self.T **2)
         
         self.z_steps = int(Lz / self.dz)  # Number of steps in propagation
+        
         # self.z_steps = 1
     def propagate(self):
         """
@@ -160,7 +164,6 @@ class THzProp:
 # Main program for testing
 if __name__ == '__main__':
     
-    # Main program for testing
     I0 = 1e8  # Peak intensity [W/m^2]
     w0 = 0.5e-4  # Beam waist [m]
     tau = 0.01e-12  # Temporal width (short pulse, in seconds)
@@ -173,71 +176,75 @@ if __name__ == '__main__':
     z_steps = int(Lz/dz)
     n0 = 3.48 # Si refractive index
     
-    n2 = 1e-15 # Nonlinear refractive index
-    beta2 = -5e-30 # GVD coefficient
+    chirp = 1e28 # Define chirp paramters
+    n2 = 0 # Nonlinear refractive index
+    beta2 = -1e-28 # GVD coefficient
     
     # Define model
-    model = THzProp(w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0)
+    for ii in range(2):
+        chirp = chirp if ii == 0 else -chirp
+        model = THzProp(w0, tau, lambda_0, Lx, T, N, dz, Lz, n0, n2, beta2, I0, chirp)
+        
+        # Propagate
+        spatial_map, temporal_map, E_list, phase_shift = model.propagate()
     
-    # Propagate
-    spatial_map, temporal_map, E_list, phase_shift = model.propagate()
-    
-    # visualization
-    t = model.t
-    x = model.x
-    
-    # reconstruct Gaussian shape
-    E0 = temporal_map[0, :]
-    E_con = fft(E0)
-    E_con[int(N/2):] = 0+1j*0
-    E_con = ifft(E_con)
-    
-    # Final pulse: Ef
-    Ef = temporal_map[-1,:]
-    Ef = np.real(Ef)
-    Ef_con = fft(Ef)
-    Ef_con[int(N/2):] = 0 + 1j*0
-    Ef_con = ifft(Ef_con)
-    
-    map_con = np.zeros(np.shape(temporal_map))
-    
-    for kk in range(temporal_map.shape[0]):
-        E_temp = temporal_map[kk, :]
-        E_temp = np.real(E_temp)
-        E_temp = fft(E_temp)
-        E_temp[int(N/2):] = 0 + 1j*0
-        E_temp = ifft(E_temp)
-        map_con[kk,:] = 2*abs(E_temp)
-    
-    _, ax = plt.subplots(1,3, figsize = (24,8))
-    fontsize = 24
-    ax[0].plot(t, E0, 'r', linestyle='--')
-    ax[0].plot(t, 2*np.abs(E_con), 'r', label="Initial Pulse")    
-    ax[0].plot(t, Ef, 'b', linestyle='--')
-    ax[0].plot(t, 2*np.abs(Ef_con), 'b', label="Final Pulse")
-    ax[0].set_title(f'beta2: {beta2}  n2: {n2}', fontsize = fontsize)
-    ax[0].set_xlabel("Time [s]", fontsize = fontsize)
-    ax[0].set_ylabel("Amplitude", fontsize = fontsize)
-    
-    # Calculate global vmin and vmax across both datasets
-    vmin = min(abs(spatial_map).min(), abs(map_con).min())
-    vmax = max(abs(spatial_map).max(), abs(map_con).max())
-    
-    # Spatial evolution plot
-    ax[1].imshow(abs(spatial_map), extent=[x.min(), x.max(), Lz, 0], aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
-    ax[1].set_xlabel("X direction [m]", fontsize = fontsize)
-    ax[1].set_ylabel("Propagation Distance [m]", fontsize = fontsize)
-    
-    # Temporal evolution plot
-    ax[2].imshow(abs(map_con), extent=[t.min()*1e12, t.max()*1e12, Lz, 0], aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
-    ax[2].set_xlabel("Time [ps]", fontsize=18)
-    ax[2].set_ylabel("Propagation Distance [m]", fontsize = fontsize)
-    
-    # set tick parameters
-    labelsize = 18
-    ax[0].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
-    ax[1].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
-    ax[2].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
-    
-    plt.tight_layout()
+        # visualization
+        t = model.t
+        x = model.x
+        
+        # Reconstruct Gaussian shape
+        E0 = temporal_map[0, :]
+        E_con = fft(E0)
+        E_con[int(N/2):] = 0+1j*0
+        E_con = ifft(E_con)
+        
+        Ef = temporal_map[-1,:]
+        Ef = np.real(Ef)
+        Ef_con = fft(Ef)
+        Ef_con[int(N/2):] = 0 + 1j*0
+        Ef_con = ifft(Ef_con)
+        
+        map_con = np.zeros(np.shape(temporal_map))
+        
+        for kk in range(temporal_map.shape[0]):
+            E_temp = temporal_map[kk, :]
+            E_temp = np.real(E_temp)
+            E_temp = fft(E_temp)
+            E_temp[int(N/2):] = 0 + 1j*0
+            E_temp = ifft(E_temp)
+            map_con[kk,:] = 2*abs(E_temp)
+        
+        # plotting part
+        _, ax = plt.subplots(1,3, figsize = (24,8))
+        fontsize = 24
+        ax[0].plot(t, E0, 'r', linestyle='--')
+        ax[0].plot(t, 2*np.abs(E_con), 'r', label="Initial Pulse")    
+        ax[0].plot(t, Ef, 'b', linestyle='--')
+        ax[0].plot(t, 2*np.abs(Ef_con), 'b', label="Final Pulse")
+        ax[0].set_xlabel("Time [s]", fontsize = fontsize)
+        ax[0].set_ylabel("Amplitude", fontsize = fontsize)
+        
+        # Calculate global vmin and vmax across both datasets
+        vmin = min(abs(spatial_map).min(), abs(map_con).min())
+        vmax = max(abs(spatial_map).max(), abs(map_con).max())
+        
+        # Spatial evolution plot
+        ax[1].imshow(abs(spatial_map), extent=[x.min(), x.max(), Lz, 0], aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
+        ax[1].set_xlabel("X direction [m]", fontsize = fontsize)
+        ax[1].set_ylabel("Propagation Distance [m]", fontsize = fontsize)
+        
+        # Temporal evolution plot
+        ax[2].imshow(abs(map_con), extent=[t.min()*1e12, t.max()*1e12, Lz, 0], aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
+        ax[2].set_xlabel("Time [ps]", fontsize=18)
+        ax[2].set_ylabel("Propagation Distance [m]", fontsize = fontsize)
+        
+        # set tick parameters
+        labelsize = 18
+        ax[0].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
+        ax[1].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
+        ax[2].tick_params(axis='both', direction='in', length=5, width=1, labelsize=labelsize)
+        
+        plt.suptitle(rf"THz Pulse Propagation Analysis for $I_0: {I0:.1e}$  $\beta_2$: {beta2}  $n_2: {n2}$  Chirp: {chirp}", fontsize=24, y=1.02)
+        plt.tight_layout()
+        plt.show()
     
